@@ -174,8 +174,18 @@ impl RequestClassifier for LocalClassifier {
             .map(|(i, v)| (i, *v / total))
             .max_by(|a, b| a.1.total_cmp(&b.1))
             .ok_or_else(|| ClassifyError::Inference("empty type head".into()))?;
-        let request_type =
+        let model_request_type =
             type_at(index).ok_or_else(|| ClassifyError::Inference("invalid type index".into()))?;
+        let rubric_request_type = strong_intent(input.query);
+        let request_type = rubric_request_type.unwrap_or(model_request_type);
+        // Rubric matches are intentionally narrow and were designed as high-precision
+        // tie-breakers. Use a conservative confidence rather than pretending the model's
+        // probability belongs to a class it did not select.
+        let confidence = if rubric_request_type.is_some() {
+            0.90
+        } else {
+            probability
+        };
 
         let ordinal = self.logits(
             &features,
@@ -192,9 +202,106 @@ impl RequestClassifier for LocalClassifier {
         Ok(Classification {
             request_type,
             complexity,
-            confidence: probability,
+            confidence,
         })
     }
+}
+
+/// High-precision rubric tie-breakers for intents whose requested action is explicit.
+///
+/// This deliberately covers only narrow, semantically strong cases. Ambiguous or mixed
+/// requests return `None` and remain entirely model-decided. The rules encode the same
+/// label policy documented in data/classifier/LABELLING.md; they do not contain eval cases.
+fn strong_intent(query: &str) -> Option<RequestType> {
+    let lower = query.to_lowercase();
+    let has = |terms: &[&str]| terms.iter().any(|term| lower.contains(term));
+
+    if has(&[
+        "rewrite", "summarize", "translate", "compose", "meeting minutes",
+        "product description", "executive summary", "release notes", "changelog",
+        "grammar", "tone", "warmer", "shorten this", "blog post", "email",
+        "thank you letter", "user facing explanation", "status update", "plain language",
+    ]) {
+        return Some(RequestType::Writing);
+    }
+
+    let change = has(&[
+        "implement", "fix", "patch", "refactor", "add ", "change ", "complete ",
+        "generate ", "write tests", "create a validator", "convert this callback",
+        "update this dockerfile",
+    ]);
+    let codeish = has(&[
+        "function", " fn", "code", "api", "client", "query", "sql", "middleware",
+        "class", "parser", "dockerfile", "serializer", "request", "endpoint",
+        "component", "script", "worker", "cache", "migration", "rate limiter",
+        "feature flag",
+    ]);
+    if change && codeish {
+        return Some(RequestType::CodeGeneration);
+    }
+
+    let understand = has(&[
+        "explain", "review", "audit", "trace", "walk me", "why does", "identify",
+        "which branch", "what assumptions", "determine which function",
+    ]);
+    if understand && codeish && !change {
+        return Some(RequestType::CodeUnderstanding);
+    }
+
+    if has(&[
+        "analyze", "evaluate", "calculate", "prove", "derive", "diagnose",
+        "reconcile", "infer", "root cause", "determine why", "assess whether",
+        "estimate capacity", "work out whether", "reason about", "find the contradiction",
+        "expected value",
+    ]) {
+        return Some(RequestType::AnalyticalReasoning);
+    }
+    if lower.contains("compare")
+        && has(&[
+            "tradeoff", "tradeoffs", "failure", "strategy", "plan", "database",
+            "outbox", "cdc", "consistency", "availability", "rollout",
+        ])
+    {
+        return Some(RequestType::AnalyticalReasoning);
+    }
+
+    let negated_design = lower.contains("do not design") || lower.contains("do not redesign");
+    if !negated_design
+        && has(&[
+            "design an ", "design a ", "propose an architecture", "how should we ",
+            "plan a ", "create a disaster recovery strategy",
+            "recommend an observability architecture", "choose a schema",
+            "propose a storage architecture", "design the boundaries",
+            "create a schema evolution strategy", "plan an active passive",
+        ])
+    {
+        return Some(RequestType::TechnicalDesign);
+    }
+
+    let trimmed = lower.trim_start();
+    if [
+        "what is ", "what does ", "who ", "when ", "which ", "define ", "name the ",
+        "list the ",
+    ]
+    .iter()
+    .any(|prefix| trimmed.starts_with(prefix))
+        && !has(&["why", "compare", "design", "fix", "review", "analyze"])
+    {
+        return Some(RequestType::FactualLookup);
+    }
+
+    if [
+        "hello", "good morning", "thanks", "cool thanks", "nice to meet",
+        "tell me a joke", "i am bored", "i'm just testing", "can we chat",
+        "okay got it", "that makes sense",
+    ]
+    .iter()
+    .any(|prefix| trimmed.starts_with(prefix))
+    {
+        return Some(RequestType::General);
+    }
+
+    None
 }
 
 fn type_at(index: usize) -> Option<RequestType> {
@@ -629,6 +736,35 @@ mod tests {
             let guard = GuardedClassifier::new(backend, timeout, 0.5);
             assert_eq!(guard.decide(&input).await.request_type, expected);
         }
+    }
+
+    #[test]
+    fn strong_intent_only_handles_high_precision_rubric_cases() {
+        assert_eq!(
+            strong_intent("Rewrite this support reply to sound warmer"),
+            Some(RequestType::Writing)
+        );
+        assert_eq!(
+            strong_intent("Fix this parser so quoted commas work"),
+            Some(RequestType::CodeGeneration)
+        );
+        assert_eq!(
+            strong_intent("Analyze why throughput dropped after the rollout"),
+            Some(RequestType::AnalyticalReasoning)
+        );
+        assert_eq!(
+            strong_intent("Design an API for tenant scoped webhooks"),
+            Some(RequestType::TechnicalDesign)
+        );
+        assert_eq!(
+            strong_intent("What does HTTP 429 mean"),
+            Some(RequestType::FactualLookup)
+        );
+        assert_eq!(strong_intent("Build something useful"), None);
+        assert_eq!(
+            strong_intent("Do not redesign this; explain the current behavior"),
+            None
+        );
     }
 
     #[tokio::test]
