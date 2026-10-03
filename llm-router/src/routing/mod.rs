@@ -88,6 +88,9 @@ pub struct RouteInputs<'a> {
     pub signals: &'a BoundarySignals,
     /// The query to classify (latest user message text). `None` disables classification.
     pub query: Option<&'a str>,
+    /// Bounded prior conversation context. Kept separate from `query` so backends can
+    /// distinguish the current instruction from earlier turns.
+    pub context: Option<&'a str>,
 }
 
 /// The outcome of routing: the model to call and how it was chosen.
@@ -273,7 +276,7 @@ pub async fn route_model_with_classifier(
                     classifier
                         .decide(&ClassifyInput {
                             query,
-                            context: None,
+                            context: inputs.context,
                         })
                         .await,
                 ),
@@ -571,6 +574,7 @@ mod tests {
             tier3_model: None,
             signals,
             query: Some("hello"),
+            context: None,
         }
     }
 
