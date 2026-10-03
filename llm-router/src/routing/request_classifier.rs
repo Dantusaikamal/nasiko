@@ -105,20 +105,23 @@ impl LocalClassifier {
         {
             return Err(ClassifyError::Load("incompatible model dimensions".into()));
         }
-        let parse_rows = |rows: Vec<HashMap<String, f32>>| -> Result<Vec<HashMap<usize, f32>>, ClassifyError> {
-            rows.into_iter()
-                .map(|row| {
-                    row.into_iter()
-                        .map(|(bucket, weight)| {
-                            bucket
-                                .parse::<usize>()
-                                .map(|bucket| (bucket, weight))
-                                .map_err(|_| ClassifyError::Load("non-numeric model bucket".into()))
-                        })
-                        .collect()
-                })
-                .collect()
-        };
+        let parse_rows =
+            |rows: Vec<HashMap<String, f32>>| -> Result<Vec<HashMap<usize, f32>>, ClassifyError> {
+                rows.into_iter()
+                    .map(|row| {
+                        row.into_iter()
+                            .map(|(bucket, weight)| {
+                                bucket
+                                    .parse::<usize>()
+                                    .map(|bucket| (bucket, weight))
+                                    .map_err(|_| {
+                                        ClassifyError::Load("non-numeric model bucket".into())
+                                    })
+                            })
+                            .collect()
+                    })
+                    .collect()
+            };
         let model = ModelFile {
             buckets: raw_model.buckets,
             type_bias: raw_model.type_bias,
@@ -215,23 +218,64 @@ fn strong_intent(query: &str) -> Option<RequestType> {
     let has = |terms: &[&str]| terms.iter().any(|term| lower.contains(term));
 
     if has(&[
-        "rewrite", "summarize", "translate", "compose", "meeting minutes",
-        "product description", "executive summary", "release notes", "changelog",
-        "grammar", "tone", "warmer", "shorten this", "blog post", "email",
-        "thank you letter", "user facing explanation", "status update", "plain language",
+        "rewrite",
+        "summarize",
+        "translate",
+        "compose",
+        "meeting minutes",
+        "product description",
+        "executive summary",
+        "release notes",
+        "changelog",
+        "grammar",
+        "tone",
+        "warmer",
+        "shorten this",
+        "blog post",
+        "email",
+        "thank you letter",
+        "user facing explanation",
+        "status update",
+        "plain language",
     ]) {
         return Some(RequestType::Writing);
     }
 
     let change = has(&[
-        "implement", "fix", "patch", "refactor", "add ", "change ", "complete ",
-        "generate ", "write tests", "create a validator", "convert this callback",
+        "implement",
+        "fix",
+        "patch",
+        "refactor",
+        "add ",
+        "change ",
+        "complete ",
+        "generate ",
+        "write tests",
+        "create a validator",
+        "convert this callback",
         "update this dockerfile",
     ]);
     let codeish = has(&[
-        "function", " fn", "code", "api", "client", "query", "sql", "middleware",
-        "class", "parser", "dockerfile", "serializer", "request", "endpoint",
-        "component", "script", "worker", "cache", "migration", "rate limiter",
+        "function",
+        " fn",
+        "code",
+        "api",
+        "client",
+        "query",
+        "sql",
+        "middleware",
+        "class",
+        "parser",
+        "dockerfile",
+        "serializer",
+        "request",
+        "endpoint",
+        "component",
+        "script",
+        "worker",
+        "cache",
+        "migration",
+        "rate limiter",
         "feature flag",
     ]);
     if change && codeish {
@@ -239,25 +283,54 @@ fn strong_intent(query: &str) -> Option<RequestType> {
     }
 
     let understand = has(&[
-        "explain", "review", "audit", "trace", "walk me", "why does", "identify",
-        "which branch", "what assumptions", "determine which function",
+        "explain",
+        "review",
+        "audit",
+        "trace",
+        "walk me",
+        "why does",
+        "identify",
+        "which branch",
+        "what assumptions",
+        "determine which function",
     ]);
     if understand && codeish && !change {
         return Some(RequestType::CodeUnderstanding);
     }
 
     if has(&[
-        "analyze", "evaluate", "calculate", "prove", "derive", "diagnose",
-        "reconcile", "infer", "root cause", "determine why", "assess whether",
-        "estimate capacity", "work out whether", "reason about", "find the contradiction",
+        "analyze",
+        "evaluate",
+        "calculate",
+        "prove",
+        "derive",
+        "diagnose",
+        "reconcile",
+        "infer",
+        "root cause",
+        "determine why",
+        "assess whether",
+        "estimate capacity",
+        "work out whether",
+        "reason about",
+        "find the contradiction",
         "expected value",
     ]) {
         return Some(RequestType::AnalyticalReasoning);
     }
     if lower.contains("compare")
         && has(&[
-            "tradeoff", "tradeoffs", "failure", "strategy", "plan", "database",
-            "outbox", "cdc", "consistency", "availability", "rollout",
+            "tradeoff",
+            "tradeoffs",
+            "failure",
+            "strategy",
+            "plan",
+            "database",
+            "outbox",
+            "cdc",
+            "consistency",
+            "availability",
+            "rollout",
         ])
     {
         return Some(RequestType::AnalyticalReasoning);
@@ -266,11 +339,18 @@ fn strong_intent(query: &str) -> Option<RequestType> {
     let negated_design = lower.contains("do not design") || lower.contains("do not redesign");
     if !negated_design
         && has(&[
-            "design an ", "design a ", "propose an architecture", "how should we ",
-            "plan a ", "create a disaster recovery strategy",
-            "recommend an observability architecture", "choose a schema",
-            "propose a storage architecture", "design the boundaries",
-            "create a schema evolution strategy", "plan an active passive",
+            "design an ",
+            "design a ",
+            "propose an architecture",
+            "how should we ",
+            "plan a ",
+            "create a disaster recovery strategy",
+            "recommend an observability architecture",
+            "choose a schema",
+            "propose a storage architecture",
+            "design the boundaries",
+            "create a schema evolution strategy",
+            "plan an active passive",
         ])
     {
         return Some(RequestType::TechnicalDesign);
@@ -278,7 +358,13 @@ fn strong_intent(query: &str) -> Option<RequestType> {
 
     let trimmed = lower.trim_start();
     if [
-        "what is ", "what does ", "who ", "when ", "which ", "define ", "name the ",
+        "what is ",
+        "what does ",
+        "who ",
+        "when ",
+        "which ",
+        "define ",
+        "name the ",
         "list the ",
     ]
     .iter()
@@ -289,9 +375,17 @@ fn strong_intent(query: &str) -> Option<RequestType> {
     }
 
     if [
-        "hello", "good morning", "thanks", "cool thanks", "nice to meet",
-        "tell me a joke", "i am bored", "i'm just testing", "can we chat",
-        "okay got it", "that makes sense",
+        "hello",
+        "good morning",
+        "thanks",
+        "cool thanks",
+        "nice to meet",
+        "tell me a joke",
+        "i am bored",
+        "i'm just testing",
+        "can we chat",
+        "okay got it",
+        "that makes sense",
     ]
     .iter()
     .any(|prefix| trimmed.starts_with(prefix))
