@@ -67,7 +67,6 @@ struct RawModelFile {
 
 #[derive(Debug)]
 struct ModelFile {
-    schema: String,
     buckets: usize,
     type_bias: Vec<f32>,
     type_weights: Vec<HashMap<usize, f32>>,
@@ -121,7 +120,6 @@ impl LocalClassifier {
                 .collect()
         };
         let model = ModelFile {
-            schema: raw_model.schema,
             buckets: raw_model.buckets,
             type_bias: raw_model.type_bias,
             type_weights: parse_rows(raw_model.type_weights)?,
