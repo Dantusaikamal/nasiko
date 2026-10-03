@@ -1,0 +1,38 @@
+name: Hackathon branch validation
+
+on:
+  push:
+    branches:
+      - classifier/adaptive-calibrated-local
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Check
+        run: cargo check --workspace
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test -p nasiko-llm-router
+      - name: Classifier smoke
+        run: |
+          curl -fsSL https://registry.nasiko.dev/r/nasiko/classifier-eval -o /tmp/classifier-eval.json
+          CLASSIFIER_BACKEND=regex EVAL_SET=/tmp/classifier-eval.json OUT=/tmp/regex.jsonl cargo run --release -p nasiko-llm-router --example classifier_eval
+          CLASSIFIER_BACKEND=local EVAL_SET=/tmp/classifier-eval.json OUT=/tmp/local.jsonl cargo run --release -p nasiko-llm-router --example classifier_eval
+          echo "regex:"
+          cat /tmp/regex.jsonl
+          echo "local:"
+          cat /tmp/local.jsonl
