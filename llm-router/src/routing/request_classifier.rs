@@ -55,13 +55,24 @@ impl RequestClassifier for RegexClassifier {
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct ModelFile {
+struct RawModelFile {
     schema: String,
     buckets: usize,
     type_bias: Vec<f32>,
     type_weights: Vec<HashMap<String, f32>>,
     complexity_bias: Vec<f32>,
     complexity_weights: Vec<HashMap<String, f32>>,
+    temperature: f32,
+}
+
+#[derive(Debug)]
+struct ModelFile {
+    schema: String,
+    buckets: usize,
+    type_bias: Vec<f32>,
+    type_weights: Vec<HashMap<usize, f32>>,
+    complexity_bias: Vec<f32>,
+    complexity_weights: Vec<HashMap<usize, f32>>,
     temperature: f32,
 }
 
@@ -82,26 +93,49 @@ impl LocalClassifier {
     }
 
     fn from_json(raw: &str) -> Result<Self, ClassifyError> {
-        let model: ModelFile = serde_json::from_str(raw)
+        let raw_model: RawModelFile = serde_json::from_str(raw)
             .map_err(|e| ClassifyError::Load(format!("invalid model JSON: {e}")))?;
-        if model.schema != "nasiko-request-classifier-linear-v1"
-            || !model.buckets.is_power_of_two()
-            || model.type_bias.len() != 7
-            || model.type_weights.len() != 7
-            || model.complexity_bias.len() != 4
-            || model.complexity_weights.len() != 4
-            || !model.temperature.is_finite()
-            || model.temperature <= 0.0
+        if raw_model.schema != "nasiko-request-classifier-linear-v1"
+            || !raw_model.buckets.is_power_of_two()
+            || raw_model.type_bias.len() != 7
+            || raw_model.type_weights.len() != 7
+            || raw_model.complexity_bias.len() != 4
+            || raw_model.complexity_weights.len() != 4
+            || !raw_model.temperature.is_finite()
+            || raw_model.temperature <= 0.0
         {
             return Err(ClassifyError::Load("incompatible model dimensions".into()));
         }
+        let parse_rows = |rows: Vec<HashMap<String, f32>>| -> Result<Vec<HashMap<usize, f32>>, ClassifyError> {
+            rows.into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .map(|(bucket, weight)| {
+                            bucket
+                                .parse::<usize>()
+                                .map(|bucket| (bucket, weight))
+                                .map_err(|_| ClassifyError::Load("non-numeric model bucket".into()))
+                        })
+                        .collect()
+                })
+                .collect()
+        };
+        let model = ModelFile {
+            schema: raw_model.schema,
+            buckets: raw_model.buckets,
+            type_bias: raw_model.type_bias,
+            type_weights: parse_rows(raw_model.type_weights)?,
+            complexity_bias: raw_model.complexity_bias,
+            complexity_weights: parse_rows(raw_model.complexity_weights)?,
+            temperature: raw_model.temperature,
+        };
         Ok(Self { model })
     }
 
     fn logits(
         &self,
         features: &HashMap<usize, f32>,
-        weights: &[HashMap<String, f32>],
+        weights: &[HashMap<usize, f32>],
         bias: &[f32],
     ) -> Vec<f32> {
         let mut ordered: Vec<(usize, f32)> = features.iter().map(|(k, v)| (*k, *v)).collect();
@@ -111,7 +145,7 @@ impl LocalClassifier {
             .zip(bias)
             .map(|(row, b)| {
                 ordered.iter().fold(*b, |sum, (bucket, value)| {
-                    sum + row.get(&bucket.to_string()).copied().unwrap_or(0.0) * value
+                    sum + row.get(bucket).copied().unwrap_or(0.0) * value
                 })
             })
             .collect()
@@ -148,9 +182,12 @@ impl RequestClassifier for LocalClassifier {
             &self.model.complexity_weights,
             &self.model.complexity_bias,
         );
+        // Cumulative ordinal heads represent P(C > k). Decode only the leading
+        // threshold prefix so an inconsistent later head can never create an impossible
+        // ordinal pattern (for example C>2 true after C>1 false).
         let complexity = 1 + ordinal
             .iter()
-            .filter(|logit| sigmoid(**logit) >= 0.5)
+            .take_while(|logit| sigmoid(**logit) >= 0.5)
             .count() as u8;
         Ok(Classification {
             request_type,
