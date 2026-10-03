@@ -58,12 +58,126 @@ SEEDS = {
  ("Recommend a fun weekend activity",1),("What is your favorite color",1),("Please continue",1),("Okay got it",1)],
 }
 
+
+EXTRA_SEEDS = {
+"code_generation": [
+ ("Modify this React component so the button is disabled while saving",2),
+ ("Add pagination to this endpoint without changing its response shape",3),
+ ("Implement an LRU cache with a configurable capacity",3),
+ ("Replace this polling loop with an async event subscription",4),
+ ("Write a SQL query that returns each customer's latest order",2),
+ ("Implement optimistic locking for concurrent updates",4),
+ ("Fix this parser so quoted commas are handled correctly",3),
+ ("Add a feature flag around the new checkout path",2),
+ ("Create a validator for nested configuration objects",3),
+ ("Make this function idempotent when the job is retried",4),
+ ("Implement a rate limiter with per tenant quotas",4),
+ ("Add timeout and cancellation support to this request",3),
+],
+"code_understanding": [
+ ("Explain why this promise chain sometimes resolves twice",3),
+ ("Which branch of this function handles cache misses",2),
+ ("Trace where this header is added before the request is sent",3),
+ ("Why does this Rust borrow checker error occur here",2),
+ ("Explain the locking strategy used by this worker pool",4),
+ ("Inspect this diff and list behavior changes without proposing fixes",3),
+ ("What assumptions does this retry loop make",3),
+ ("Find the memory leak in this lifecycle without editing the code",4),
+ ("Explain why this SQL query cannot use the index",4),
+ ("Review this state machine for unreachable states",4),
+ ("Determine which function mutates this shared object",2),
+ ("Why can this async code deadlock under load",5),
+],
+"technical_design": [
+ ("Design a webhook delivery system with retries and deduplication",4),
+ ("How should we partition this event stream across tenants",4),
+ ("Propose a storage architecture for immutable audit logs",4),
+ ("Design a service that processes uploaded documents asynchronously",4),
+ ("Plan a migration from polling to event driven updates",4),
+ ("How should we model permissions for organizations projects and users",4),
+ ("Design a cache hierarchy for a globally distributed read heavy API",5),
+ ("Design a high availability scheduler for recurring jobs",5),
+ ("Propose an architecture for serving embeddings with low latency",4),
+ ("Design the boundaries between billing metering and invoicing services",5),
+ ("Create a schema evolution strategy for event consumers",4),
+ ("Design rate limiting across multiple gateway instances",4),
+],
+"analytical_reasoning": [
+ ("Given these logs determine the most likely sequence of failures",4),
+ ("Compare two rollout strategies under the stated risk assumptions",4),
+ ("Work out whether this cache policy can produce stale reads",4),
+ ("Calculate the break even point between these pricing plans",3),
+ ("Determine which hypothesis is consistent with all observations",4),
+ ("Analyze why throughput dropped even though CPU usage fell",4),
+ ("Infer the missing value from these invariants",4),
+ ("Evaluate whether this benchmark comparison is statistically meaningful",4),
+ ("Determine whether these transactions can violate serializability",5),
+ ("Find the contradiction in this set of requirements",3),
+ ("Analyze whether this lock ordering can deadlock",5),
+ ("Derive the expected latency of this fan out request",4),
+],
+"writing": [
+ ("Rewrite this error message so users know what to do next",1),
+ ("Turn these bullet points into a clear status update",2),
+ ("Polish this README introduction without changing technical meaning",2),
+ ("Draft a short incident update for customers",2),
+ ("Summarize this meeting transcript into decisions and action items",3),
+ ("Rewrite this support reply to sound warmer and more concise",1),
+ ("Create release notes from these merged changes",3),
+ ("Edit this policy text for plain language",2),
+ ("Write an executive summary of this technical report",3),
+ ("Draft an onboarding checklist for new engineers",2),
+ ("Rewrite these API docs for consistency",2),
+ ("Draft a user facing explanation of the outage",2),
+],
+"factual_lookup": [
+ ("What does CAP theorem stand for",1),
+ ("Which HTTP method is normally used for a partial update",1),
+ ("Define eventual consistency",1),
+ ("What is the default port for PostgreSQL",1),
+ ("What does TTL mean in caching",1),
+ ("What is a foreign key",1),
+ ("Which data structure uses FIFO ordering",1),
+ ("Define a semaphore",1),
+ ("What does JSON stand for",1),
+ ("What is the purpose of a DNS A record",1),
+ ("Name the four ACID properties",1),
+ ("What does an HTTP 404 response indicate",1),
+],
+"general": [
+ ("Nice to meet you",1),
+ ("Tell me something surprising",1),
+ ("I need a little motivation today",1),
+ ("Can you keep me company while I work",1),
+ ("That makes sense",1),
+ ("Let's talk about something else",1),
+ ("Give me a random conversation starter",1),
+ ("What should we chat about",1),
+ ("Haha that's funny",1),
+ ("I'm just testing the chat",1),
+ ("I'm not sure what I need yet",1),
+ ("Cool thanks",1),
+],
+}
+for _label, _items in EXTRA_SEEDS.items():
+    SEEDS[_label].extend(_items)
+
+CONTEXTS = [
+ "The service runs in production and backwards compatibility matters.",
+ "We have an existing implementation and want to preserve external behavior.",
+ "The request follows a discussion about reliability, latency, and failure handling.",
+ "The system is multi-tenant and changes must avoid cross-tenant impact.",
+ "The team is reviewing a regression reported after the latest release.",
+ "The input includes code and logs from an existing application.",
+]
+
 VARIANTS = [
  lambda q: q,
  lambda q: "Please " + q[0].lower() + q[1:] + ".",
  lambda q: "Task: " + q.replace("this", "the supplied").replace(" a ", " one ", 1),
  lambda q: "Context: production system. " + q,
  lambda q: "plz " + q.lower().replace("please", "").replace("function", "fn").lstrip(),
+ lambda q: "For context, monitoring and tests already exist. The important request is: " + q,
 ]
 
 def fnv(data: bytes) -> int:
@@ -113,9 +227,10 @@ def rows():
             for variant,transform in enumerate(VARIANTS):
                 query=transform(base.format(lang=["Rust","Python","TypeScript"][family%3],place=["France","Japan","Kenya"][family%3]))
                 context=None
-                if variant==3: context="The request follows an existing production discussion with reliability constraints."
+                if variant in (3,5): context=CONTEXTS[(family+variant)%len(CONTEXTS)]
                 row={"id":f"{label}-{family:02d}-{variant}","family":f"{label}-{family:02d}","query":query,"context":context,"request_type":label,"complexity":complexity}
-                (val if family in (3,10) else train).append(row)
+                class_index=LABELS.index(label)
+                (val if (family+class_index)%5==0 else train).append(row)
     return train,val
 
 def softmax(z):
