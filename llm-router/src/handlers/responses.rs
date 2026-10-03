@@ -110,6 +110,7 @@ async fn responses_core(
         turn_ordinal: user_turn_ordinal(body.get("input")),
         is_tool_continuation: is_tool_continuation(body.get("input")),
         query,
+        context: None,
     };
     let routed = resolve_routed_request(
         ctx,
