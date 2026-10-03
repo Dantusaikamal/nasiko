@@ -467,11 +467,12 @@ pub(crate) async fn resolve_routed_request(
             Some(attribution.source),
         )
     };
-    let decision = routing::route_model(
+    let decision = routing::route_model_with_classifier(
         ctx.router_cache.as_ref(),
         ctx.tier_registry.as_ref(),
         ctx.cell_store.as_ref(),
         ctx.salience_gate.as_ref(),
+        Some(ctx.request_classifier.as_ref()),
         &RouteInputs {
             agent_id: &agent_id,
             provider: &resolved.provider,
@@ -957,6 +958,7 @@ mod tests {
             tier_registry: Arc::new(NoTiers),
             cell_store: Arc::new(crate::routing::InMemoryCellStore::new()),
             salience_gate: Arc::new(crate::routing::AllowAllGate),
+            request_classifier: Arc::new(crate::routing::build_classifier("regex", "", 50, 0.3)),
             pricing: Arc::new(nasiko_pricing::PricingEngine::new(
                 PgPool::connect_lazy("postgres://u:p@127.0.0.1:5999/none").unwrap(),
             )),
