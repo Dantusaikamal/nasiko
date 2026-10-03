@@ -34,6 +34,17 @@ jobs:
             git commit -m "style: rustfmt classifier hardening"
             git push
           fi
+      - name: Regenerate classifier artifact
+        run: python llm-router/scripts/classifier_train.py
+      - name: Commit regenerated classifier artifacts if needed
+        run: |
+          if ! git diff --quiet -- llm-router/assets/classifier/linear-v1.json llm-router/data/classifier/train.jsonl llm-router/data/classifier/validation.jsonl; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add llm-router/assets/classifier/linear-v1.json llm-router/data/classifier/train.jsonl llm-router/data/classifier/validation.jsonl
+            git commit -m "classifier: regenerate expanded deterministic model"
+            git push
+          fi
       - name: Check
         run: cargo check --workspace
       - name: Clippy
